@@ -1,0 +1,7 @@
+.vscode
+bin
+bin-int
+# not needed at all
+entt
+*.bat
+*.o
