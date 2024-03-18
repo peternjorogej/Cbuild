@@ -47,6 +47,9 @@ static void __CbuildAssert(bool bCondition, const char* lpFile, const char* lpFu
 #define CBUILD_ASSERT(x, ...) ((void)((x), (__VA_ARGS__)))
 #endif // CBUILD_HAVE_ASSERTS
 
+#define CBUILD_LOG(f, ...)    fprintf((f), __VA_ARGS__)
+#define CBUILD_LOG_ERROR(...) CBUILD_LOG(stderr, __VA_ARGS__)
+
 
 namespace Cbuild::Argv
 {
@@ -197,6 +200,10 @@ namespace Cbuild::Builders
                 {
                     cmd.Args.push_back("-std=c" + m_Project->CVersion);
                 }
+                for (const auto& flag : m_Project->Flags)
+                {
+                    cmd.Args.push_back("-" + flag);
+                }
                 for (const auto& flag : config.Flags)
                 {
                     cmd.Args.push_back("-" + flag);
@@ -337,6 +344,10 @@ namespace Cbuild::Builders
                 {
                     cmd.Args.push_back("-std=c" + m_Project->CVersion);
                 }
+                for (const auto& flag : m_Project->Flags)
+                {
+                    cmd.Args.push_back("-" + flag);
+                }
                 for (const auto& flag : config.Flags)
                 {
                     cmd.Args.push_back("-" + flag);
@@ -469,6 +480,7 @@ namespace Cbuild
             }
             else
             {
+                CBUILD_LOG_ERROR("Error: Workspace must have a name (offset: %lld)\n", xWks.offset_debug());
                 return false;
             }
             
@@ -492,6 +504,16 @@ namespace Cbuild
                 pWks->IntermediateDir = std::string{ "bin-int" };
             }
             
+            // CWD
+            if (const auto xWorkingDirectory = xWks.child("WorkingDirectory"))
+            {
+                pWks->Cwd = std::string{ xWorkingDirectory.child_value() };
+            }
+            else
+            {
+                pWks->Cwd = std::string{ "./" };
+            }
+
             // Projects
             for (const auto& xProject : xWks.children("Project"))
             {
@@ -511,34 +533,75 @@ namespace Cbuild
         static bool LoadProject(Project* const pProject, const pugi::xml_node& xProject) noexcept
         {
             // Attributes (Name, Kind, Arch, Language, (C/Cpp)Version, Compiler, ...)
-            // const pugi::xml_node xProject = doc.first_child();
             if (!ReadProjectAttributes(pProject, xProject))
             {
                 return false;
             }
 
-            // CWD
-            if (const auto xWorkingDirectory = xProject.child("WorkingDirectory"))
+            // Configurations
+            for (const auto& xConfiguration : xProject.children("Configuration"))
             {
-                pProject->Wks->Cwd = std::string{ xWorkingDirectory.child_value() };
-            }
-            else
-            {
-                pProject->Wks->Cwd = std::string{ "./" };
-            }
-
-            // Output Directory
-            // if (const auto xOutputDir = xProject.child("OutputDir"))
-            // {
-            //     pProject->OutputDir = std::string{ xOutputDir.child_value() };
-            // }
-
-            // Project (Global) Defines
-            if (const auto xGlobalDefines = xProject.child("GlobalDefines"))
-            {
-                for (const auto& xItem : xGlobalDefines.children("Item"))
+                if (const auto xName = xConfiguration.attribute("Name"))
                 {
-                    pProject->Defines.push_back(std::string{ xItem.child_value() });
+                    const Configuration config = { .Name = xName.as_string() };
+                    pProject->Configurations.insert({ config.Name, config });
+                }
+                else
+                {
+                    CBUILD_LOG_ERROR("Error: Configuration has no name (offset: %lld)\n", xConfiguration.offset_debug());
+                    return false;
+                }
+            }
+
+            // Flags (options)
+            if (const auto xFlags = xProject.child("Flags"))
+            {
+                for (const auto& xItem : xFlags.children("Item"))
+                {
+                    if (const auto xConfig = xItem.attribute("Configuration"))
+                    {
+                        const std::string configName = std::string{ xConfig.as_string() };
+                        if (const auto it = pProject->Configurations.find(configName); it != pProject->Configurations.end())
+                        {
+                            Configuration& config = it->second;
+                            config.Flags.push_back(std::string{ xItem.child_value() });
+                        }
+                        else
+                        {
+                            CBUILD_LOG_ERROR("Error: Configuration `%s` not found\n", configName.c_str());
+                            return false;
+                        }
+                    }
+                    else
+                    {
+                        pProject->Flags.push_back(std::string{ xItem.child_value() });
+                    }
+                }
+            }
+
+            // Defines
+            if (const auto xDefine = xProject.child("Defines"))
+            {
+                for (const auto& xItem : xDefine.children("Item"))
+                {
+                    if (const auto xConfig = xItem.attribute("Configuration"))
+                    {
+                        const std::string configName = std::string{ xConfig.as_string() };
+                        if (const auto it = pProject->Configurations.find(configName); it != pProject->Configurations.end())
+                        {
+                            Configuration& config = it->second;
+                            config.Defines.push_back(std::string{ xItem.child_value() });
+                        }
+                        else
+                        {
+                            CBUILD_LOG_ERROR("Error: Configuration `%s` not found\n", configName.c_str());
+                            return false;
+                        }
+                    }
+                    else
+                    {
+                        pProject->Defines.push_back(std::string{ xItem.child_value() });
+                    }
                 }
             }
 
@@ -576,15 +639,6 @@ namespace Cbuild
                 }
             }
 
-            // Configurations
-            for (const auto& xConfiguration : xProject.children("Configuration"))
-            {
-                if (!XmlReadHelper::ReadProjectConfiguration(pProject, xConfiguration))
-                {
-                    return false;
-                }
-            }
-
             return true;
         }
     
@@ -604,11 +658,13 @@ namespace Cbuild
 
             if (pProject->Name.empty())
             {
+                CBUILD_LOG_ERROR("Error: Project must have a name (offset: %lld)\n", xProject.offset_debug());
                 return false;
             }
 
             if (!bIsLanguageSet && !bIsLangVersionSet && !bIsCompilerSet)
             {
+                CBUILD_LOG_ERROR("Error: At least one of 'Language', 'CVersion|CppVersion', 'Compiler' must be set (offset: %lld)\n", xProject.offset_debug());
                 return false;
             }
 
@@ -631,7 +687,7 @@ namespace Cbuild
             return true;
         }
 
-        static bool ReadProjectConfiguration(Project* const pProject, const pugi::xml_node& xConfiguration) noexcept
+        /* static bool ReadProjectConfiguration(Project* const pProject, const pugi::xml_node& xConfiguration) noexcept
         {
             Configuration config = {};
             // Name
@@ -643,7 +699,7 @@ namespace Cbuild
             {
                 return false;
             }
-            
+
             // Flags (options)
             if (const auto xFlags = xConfiguration.child("Flags"))
             {
@@ -652,7 +708,7 @@ namespace Cbuild
                     config.Flags.push_back(std::string{ xItem.child_value() });
                 }
             }
-            
+
             // Configuration-dependent Defines (e.g DEBUG, NDEBUG, RELEASE, ASSERT, ...)
             if (const auto xDefines = xConfiguration.child("Defines"))
             {
@@ -665,7 +721,7 @@ namespace Cbuild
             // pProject->Configurations[config.Name] = config;
             pProject->Configurations.insert({ config.Name, config });
             return true;
-        }
+        } */
     };
 
 

@@ -83,6 +83,7 @@ namespace Cbuild
         std::string CVersion = {};
         std::string CppVersion = {};
         std::string Compiler = {};
+        List<std::string> Flags = {};
         List<std::string> Defines = {};
         List<std::string> IncludeDirs = {};
         List<std::string> SourceDirs = {};
