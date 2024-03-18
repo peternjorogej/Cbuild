@@ -4,15 +4,15 @@
     <IntermediateDir>bin-int</IntermediateDir>
 
     <Project Name="Api" Kind="SharedLibrary" Arch="x64" Language="C++"  CppVersion="17" Compiler="g++">
-        <Configuration Name="Debug">
-            <Flags>
-                <Item>ggdb</Item>
-                <Item>Og</Item>
-            </Flags>
-            <Defines>
-                <Item>API_DEBUG</Item>
-            </Defines>
-        </Configuration>
+        <Configuration Name="Debug" />
+
+        <Flags>
+            <Item Configuration="Debug">ggdb</Item>
+            <Item Configuration="Debug">Og</Item>
+        </Flags>
+        <Defines>
+            <Item Configuration="Debug">API_DEBUG</Item>
+        </Defines>
 
         <SourceDirs>
             <Item>Api</Item>
@@ -20,18 +20,19 @@
     </Project>
     
     <Project Name="Driver" Kind="ConsoleApp" Arch="x64" Language="C++"  CppVersion="17" Compiler="g++">
-        <Configuration Name="Debug">
-            <Flags>
-                <Item>ggdb</Item>
-                <Item>Og</Item>
-            </Flags>
-            <Defines>
-                <Item>API_DEBUG</Item>
-            </Defines>
-        </Configuration>
+        <Configuration Name="Debug" />
+
+        <Flags>
+            <Item Configuration="Debug">ggdb</Item>
+            <Item Configuration="Debug">Og</Item>
+        </Flags>
+        <Defines>
+            <Item Configuration="Debug">API_DEBUG</Item>
+        </Defines>
 
         <LibraryDirs>
             <Item>bin\Debug</Item>
+            <!-- <Item>bin\$(Configuration)</Item> -->
         </LibraryDirs>
         <References>
             <Item>Api</Item>
