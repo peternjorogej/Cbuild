@@ -38,8 +38,11 @@
             <Item>Api</Item>
         </References>
 
+        <IncludeDirs>
+            <Item>.</Item>
+        </IncludeDirs>
         <SourceDirs>
-            <Item>./</Item>
+            <Item>Driver</Item>
         </SourceDirs>
     </Project>
     

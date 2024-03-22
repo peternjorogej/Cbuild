@@ -686,42 +686,6 @@ namespace Cbuild
 
             return true;
         }
-
-        /* static bool ReadProjectConfiguration(Project* const pProject, const pugi::xml_node& xConfiguration) noexcept
-        {
-            Configuration config = {};
-            // Name
-            if (const auto xAttr = xConfiguration.attribute("Name"))
-            {
-                config.Name = std::string{ xAttr.as_string() };
-            }
-            else
-            {
-                return false;
-            }
-
-            // Flags (options)
-            if (const auto xFlags = xConfiguration.child("Flags"))
-            {
-                for (const auto& xItem : xFlags.children("Item"))
-                {
-                    config.Flags.push_back(std::string{ xItem.child_value() });
-                }
-            }
-
-            // Configuration-dependent Defines (e.g DEBUG, NDEBUG, RELEASE, ASSERT, ...)
-            if (const auto xDefines = xConfiguration.child("Defines"))
-            {
-                for (const auto& xItem : xDefines.children("Item"))
-                {
-                    config.Defines.push_back(std::string{ xItem.child_value() });
-                }
-            }
-
-            // pProject->Configurations[config.Name] = config;
-            pProject->Configurations.insert({ config.Name, config });
-            return true;
-        } */
     };
 
 
@@ -805,37 +769,75 @@ namespace Cbuild
     {
         namespace stdfs = std::filesystem;
 
-        const stdfs::path cwd = stdfs::path(m_Project->Wks->Cwd);
-        const std::string ConfigName{ lpConfiguration }; 
-        const std::string IntermediateDir = std::format("{}\\{}", m_Project->Wks->IntermediateDir, ConfigName);
-        const std::string OutputDir = std::format("{}\\{}", m_Project->Wks->OutputDir, ConfigName);
+        static constexpr uint32_t DirectoryWalkRecursionDepth = 8ul;
 
-        for (const auto& srcdir : m_Project->SourceDirs)
+        // Data needed to traverse the directory (refs used since there's no need for copies)
+        // NOTE: Too much?
+        struct DirWalkInfo
         {
-            const bool bSrcDirIsCwd = srcdir == "." || srcdir == "./";
-            const stdfs::path dir = bSrcDirIsCwd ? cwd : (cwd / srcdir);
+            IProjectBuilder*   Builder;
+            const Command&     BaseCmd;
+            const std::string& ObjectDir;
+            const stdfs::path& Directory;
+            uint32_t           Depth;
+        };
 
-            for (const stdfs::directory_entry& entry : stdfs::directory_iterator(dir))
+        // Lambdas have to be defined with a type to be used recusively
+        using pfnWalkDirectory = void(*)(const DirWalkInfo&);
+
+        static const pfnWalkDirectory WalkDirectory = [](const DirWalkInfo& dwi) -> void
+        {
+            for (const stdfs::directory_entry& entry : stdfs::directory_iterator(dwi.Directory))
             {
                 const stdfs::path& path = entry.path();
                 const std::string ext = path.extension().string();
 
                 if (stdfs::is_regular_file(path) && (ext == ".c" || ext == ".cpp"))
                 {
-                    Command cmd{ baseCmd };
+                    Command cmd{ dwi.BaseCmd };
 
                     const std::string PathStr = path.string();
-                    const std::string IntermediateFile = std::format("{}\\{}.o", IntermediateDir, path.stem().string());
+                    const std::string IntermediateFile = std::format("{}\\{}.o", dwi.ObjectDir, path.stem().string());
 
                     cmd.Args.push_back("-c");
                     cmd.Args.push_back(PathStr);
                     cmd.Args.push_back("-o");
                     cmd.Args.push_back(IntermediateFile);
 
-                    m_Commands.push_back(std::move(cmd));
-                    m_OutputFiles.push_back(std::move(IntermediateFile));
+                    dwi.Builder->m_Commands.push_back(std::move(cmd));
+                    dwi.Builder->m_OutputFiles.push_back(std::move(IntermediateFile));
+                }
+
+                // Make sure we don't exceed the recursion limit (8 sub-directories deep should be enough)
+                if (stdfs::is_directory(path) && dwi.Depth <= DirectoryWalkRecursionDepth)
+                {
+                    // Recursively traverse the source directory
+                    const DirWalkInfo info
+                    {
+                        .Builder = dwi.Builder,
+                        .BaseCmd = dwi.BaseCmd,
+                        .ObjectDir = dwi.ObjectDir,
+                        .Directory = path,
+                        .Depth = dwi.Depth + 1ul
+                    };
+                    WalkDirectory(info);
                 }
             }
+        };
+
+        // Get th source files from the source directories
+        const stdfs::path Cwd = stdfs::path(m_Project->Wks->Cwd);
+        const std::string ConfigName{ lpConfiguration }; 
+        const std::string IntermediateDir = std::format("{}\\{}", m_Project->Wks->IntermediateDir, ConfigName);
+        const std::string OutputDir = std::format("{}\\{}", m_Project->Wks->OutputDir, ConfigName);
+
+        for (const auto& srcdir : m_Project->SourceDirs)
+        {
+            const bool bSrcDirIsCwd = srcdir == "." || srcdir == "./" || srcdir == ".\\";
+            const stdfs::path dir = bSrcDirIsCwd ? Cwd : (Cwd / srcdir);
+
+            const DirWalkInfo dwi{ .Builder = this, .BaseCmd = baseCmd, .ObjectDir = IntermediateDir, .Directory = dir, .Depth = 0 };
+            WalkDirectory(dwi);
         }
 
         return 0;
