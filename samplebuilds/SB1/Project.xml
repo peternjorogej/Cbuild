@@ -5,13 +5,16 @@
 
     <Project Name="Api" Kind="SharedLibrary" Arch="x64" Language="C++"  CppVersion="17" Compiler="g++">
         <Configuration Name="Debug" />
+        <Configuration Name="Release" />
 
         <Flags>
             <Item Configuration="Debug">ggdb</Item>
             <Item Configuration="Debug">Og</Item>
+            <Item Configuration="Release">O2</Item>
         </Flags>
         <Defines>
             <Item Configuration="Debug">API_DEBUG</Item>
+            <Item Configuration="Release">API_RELEASE</Item>
         </Defines>
 
         <SourceDirs>
@@ -21,18 +24,21 @@
     
     <Project Name="Driver" Kind="ConsoleApp" Arch="x64" Language="C++"  CppVersion="17" Compiler="g++">
         <Configuration Name="Debug" />
+        <Configuration Name="Release" />
 
         <Flags>
             <Item Configuration="Debug">ggdb</Item>
             <Item Configuration="Debug">Og</Item>
+            <Item Configuration="Release">O2</Item>
         </Flags>
         <Defines>
             <Item Configuration="Debug">API_DEBUG</Item>
+            <Item Configuration="Release">API_RELEASE</Item>
         </Defines>
 
         <LibraryDirs>
-            <Item>bin\Debug</Item>
-            <!-- <Item>bin\$(Configuration)</Item> -->
+            <!-- <Item>bin\Debug</Item> -->
+            <Item>bin\$(Configuration)</Item>
         </LibraryDirs>
         <References>
             <Item>Api</Item>

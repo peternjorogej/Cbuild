@@ -7,6 +7,7 @@
 #include <memory>
 #include <filesystem>
 #include <format>
+#include <regex>
 
 #include <Windows.h>
 
@@ -133,7 +134,7 @@ namespace Cbuild
     
     enum BuildResult : int32_t
     {
-        CommandProcessFailed = -69,
+        CommandProcessingFailed = -69,
         WksBuildFailed = -70,
     };
 
@@ -142,6 +143,49 @@ namespace Cbuild
 
 namespace Cbuild::Builders
 {
+
+    struct SetResult
+    {
+        std::string Result = {};
+        bool Succeeded = false;
+    };
+
+    // TODO: Improve
+    static SetResult SetVariables(const std::string& Path, const std::string& Variable, const char* lpValue) noexcept
+    {
+        static const Dictionary<bool> s_ValidVariables =
+        {
+            { "Configuration", true }
+        };
+
+        if (s_ValidVariables.find(Variable) == s_ValidVariables.end())
+        {
+            return { .Result = {}, .Succeeded = false };
+        }
+
+        // Pattern: $(Variable)
+        const std::regex regex{ R"(\$\([a-zA-Z0-9_]*\))" };
+        try
+        {
+            if (std::regex_search(Path, regex))
+            {
+                return { .Result = std::regex_replace(Path, regex, lpValue), .Succeeded = true };
+            }
+        }
+        // Let all the catches fall through
+        catch(const std::regex_error& e) { }
+        catch(const std::exception& e) { }
+        catch(...) { }
+
+        return { .Result = {}, .Succeeded = false };
+    }
+
+    static SetResult SetVariables(const std::filesystem::path& Path, const std::string& Variable, const char* lpValue) noexcept
+    {
+        const std::string path = Path.string();
+        return SetVariables(path, Variable, lpValue);
+    }
+
 
     class ConsoleAppBuilder : public IProjectBuilder
     {
@@ -162,7 +206,7 @@ namespace Cbuild::Builders
             if (it == m_Project->Configurations.end())
             {
                 printf("[ERROR]: Configuration `%s` was not found (check if it was defined and try again)\n", lpConfiguration);
-                return BuildResult::CommandProcessFailed;
+                return BuildResult::CommandProcessingFailed;
             }
 
             const Configuration& config = it->second;
@@ -212,7 +256,7 @@ namespace Cbuild::Builders
                 return cmd;
             };
 
-            const auto PrepareFinalBuildCommand = [this, &outputFilename]() -> void
+            const auto PrepareFinalBuildCommand = [this, &outputFilename, lpConfiguration]() -> void
             {
                 Command buildConsoleAppCmd{ .Name = m_Project->Compiler };
 
@@ -225,7 +269,9 @@ namespace Cbuild::Builders
                 // Library & References
                 for (const auto& libdir : m_Project->LibraryDirs)
                 {
-                    buildConsoleAppCmd.Args.push_back("-L" + libdir);
+                    const auto[dir, succeeded] = SetVariables(libdir, "Configuration", lpConfiguration);
+                    CBUILD_ASSERT(succeeded, "Failed to set library directory (`%s`) from variable", libdir.c_str());
+                    buildConsoleAppCmd.Args.push_back("-L" + dir);
                 }
                 for (const auto& ref : m_Project->References)
                 {
@@ -295,7 +341,7 @@ namespace Cbuild::Builders
             if (it == m_Project->Configurations.end())
             {
                 printf("[ERROR]: Configuration `%s` was not found (check if it was defined and try again)\n", lpConfiguration);
-                return BuildResult::CommandProcessFailed;
+                return BuildResult::CommandProcessingFailed;
             }
 
             const Configuration& config = it->second;
@@ -825,7 +871,7 @@ namespace Cbuild
             }
         };
 
-        // Get th source files from the source directories
+        // Get the source files from the source directories
         const stdfs::path Cwd = stdfs::path(m_Project->Wks->Cwd);
         const std::string ConfigName{ lpConfiguration }; 
         const std::string IntermediateDir = std::format("{}\\{}", m_Project->Wks->IntermediateDir, ConfigName);
@@ -858,9 +904,9 @@ int main(int iArgc, char* ppArgv[])
         }
 
         int32_t iResult = wks.Build(bo.BuildConfiguration);
-        if (iResult == Cbuild::BuildResult::CommandProcessFailed)
+        if (iResult == Cbuild::BuildResult::CommandProcessingFailed)
         {
-            printf("Error: Cbuild::BuildResult::CommandProcessFailed (Please check that the project file is well defined).\n");
+            printf("Error: Cbuild::BuildResult::CommandProcessingFailed (Please check that the project file is well defined).\n");
             return -3;
         }
         if (iResult == Cbuild::BuildResult::WksBuildFailed)
