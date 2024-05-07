@@ -163,6 +163,13 @@ namespace Cbuild::Builders
             return { .Result = {}, .Succeeded = false };
         }
 
+        // If `Path` doesn't have a variable, exit early
+        // Not all paths have variables
+        if (Path.find('$', 0ull) == std::string::npos)
+        {
+            return { .Result = Path, .Succeeded = true };
+        }
+
         // Pattern: $(Variable)
         const std::regex regex{ R"(\$\([a-zA-Z0-9_]*\))" };
         try
@@ -322,15 +329,15 @@ namespace Cbuild::Builders
     };
 
 
-    class LibraryBuilder : public IProjectBuilder
+    class StaticLibraryBuilder : public IProjectBuilder
     {
     public:
-        inline LibraryBuilder(const Project* pProject)
+        inline StaticLibraryBuilder(const Project* pProject)
         {
             m_Project = pProject;
         }
 
-        inline virtual ~LibraryBuilder() noexcept override = default;
+        inline virtual ~StaticLibraryBuilder() noexcept override = default;
 
         virtual int32_t Build(const char* lpConfiguration) noexcept override
         {
@@ -405,18 +412,162 @@ namespace Cbuild::Builders
             const auto PrepareFinalBuildCommand = [this, &outputDir, &outputFilename]() -> void
             {
                 Command buildLibraryCmd = {};
-                if (m_Project->OutputKind == BuildOutputKind::StaticLibrary)
+
+                buildLibraryCmd.Name = "ar";
+                buildLibraryCmd.Args.push_back("-rcs");
+
+                // Output
+                buildLibraryCmd.Args.push_back("-o");
+                buildLibraryCmd.Args.push_back(outputFilename);
+                // Intermediate Files
+                for (const auto& obj : m_OutputFiles)
                 {
-                    buildLibraryCmd.Name = "ar";
-                    buildLibraryCmd.Args.push_back("-rcs");
+                    buildLibraryCmd.Args.push_back(obj);
+                }
+                
+                m_Commands.push_back(buildLibraryCmd);
+                m_OutputFiles.push_back(outputFilename);
+            };
+
+            const auto BuildApp = [this]() -> int32_t
+            {
+                List<std::string> cmdLines;
+                cmdLines.reserve(m_Commands.size());
+
+                for (const auto& cmd : m_Commands)
+                {
+                    std::ostringstream oss;
+                    oss << cmd.Name;
+                    for (const auto& arg : cmd.Args)
+                    {
+                        oss << " " << arg;
+                    }
+                    cmdLines.push_back(oss.str());
+                }
+
+                BuildResult br = (BuildResult)0;
+                for (const auto& cmdline : cmdLines)
+                {
+                    printf("%s\n", cmdline.c_str());
+                    if (system(cmdline.c_str()) != 0)
+                    {
+                        br = BuildResult::WksBuildFailed;
+                    }
+                }
+
+                return br;
+            };
+
+            GenerateBuildCommandsAndOutputFiles(lpConfiguration, PrepareBaseCommand());
+            PrepareFinalBuildCommand();
+
+            return BuildApp();
+        }
+    };
+
+
+    class SharedLibraryBuilder : public IProjectBuilder
+    {
+    public:
+        inline SharedLibraryBuilder(const Project* pProject)
+        {
+            m_Project = pProject;
+        }
+
+        inline virtual ~SharedLibraryBuilder() noexcept override = default;
+
+        virtual int32_t Build(const char* lpConfiguration) noexcept override
+        {
+            CBUILD_ASSERT(!m_Project->Configurations.empty(), "No configurations defined!");
+            CBUILD_ASSERT(lpConfiguration && *lpConfiguration, "Invalid configuration");
+
+            const auto it = m_Project->Configurations.find({ lpConfiguration });
+            if (it == m_Project->Configurations.end())
+            {
+                printf("[ERROR]: Configuration `%s` was not found (check if it was defined and try again)\n", lpConfiguration);
+                return BuildResult::CommandProcessingFailed;
+            }
+
+            const Configuration& config = it->second;
+            const char* ext = m_Project->OutputKind == BuildOutputKind::StaticLibrary ? "lib" : CBUILD_SHARED_LIB_EXT;
+            const std::string outputDir = std::format("{}\\{}", m_Project->Wks->OutputDir, lpConfiguration);
+            const std::string outputFilename = std::format("{}\\{}.{}", outputDir , m_Project->Name, ext);
+
+            const auto PrepareBaseCommand = [this, &config, lpConfiguration]() -> Command
+            {
+                // <CC> (-D <DEF> ...) (-I <INC> ...) (-L <LIBDIR> ...) (-l <LIB> ...) (<OPTS> ...) (<IN> ...)
+                Command cmd = { .Name = m_Project->Compiler };
+
+                // Defines
+                for (const auto& def : m_Project->Defines)
+                {
+                    cmd.Args.push_back("-D" + def);
+                }
+                for (const auto& def : config.Defines)
+                {
+                    cmd.Args.push_back("-D" + def);
+                }
+                // Includes
+                for (const auto& inc : m_Project->IncludeDirs)
+                {
+                    cmd.Args.push_back("-I" + inc);
+                }
+                // Library & References
+                /* for (const auto& libdir : m_Project->LibraryDirs)
+                {
+                    const auto[dir, succeeded] = SetVariables(libdir, "Configuration", lpConfiguration);
+                    CBUILD_ASSERT(succeeded, "Failed to set library directory (`%s`) from variable", libdir.c_str());
+                    cmd.Args.push_back("-L" + dir);
+                }
+                for (const auto& ref : m_Project->References)
+                {
+                    cmd.Args.push_back("-l" + ref);
+                } */
+                // Options
+                if (m_Project->Arch.size() && m_Project->Arch == "x64")
+                {
+                    cmd.Args.push_back("-m64");
+                }
+                if (m_Project->Language == "C++")
+                {
+                    cmd.Args.push_back("-std=c++" + m_Project->CppVersion);
                 }
                 else
                 {
-                    buildLibraryCmd.Name = m_Project->Compiler;
-                    buildLibraryCmd.Args.push_back("-shared");
-                    buildLibraryCmd.Args.push_back(std::format("-Xlinker --out-implib {}\\{}.lib", outputDir, m_Project->Name));
+                    cmd.Args.push_back("-std=c" + m_Project->CVersion);
                 }
+                for (const auto& flag : m_Project->Flags)
+                {
+                    cmd.Args.push_back("-" + flag);
+                }
+                for (const auto& flag : config.Flags)
+                {
+                    cmd.Args.push_back("-" + flag);
+                }
+                
+                return cmd;
+            };
 
+            const auto PrepareFinalBuildCommand = [this, &outputDir, &outputFilename, lpConfiguration]() -> void
+            {
+                Command buildLibraryCmd = {};
+
+                buildLibraryCmd.Name = m_Project->Compiler;
+                buildLibraryCmd.Args.push_back("-shared");
+                buildLibraryCmd.Args.push_back(std::format("-Xlinker --out-implib {}\\{}.lib", outputDir, m_Project->Name));
+
+                // Library & References
+                for (const auto& libdir : m_Project->LibraryDirs)
+                {
+                    const auto[dir, succeeded] = SetVariables(libdir, "Configuration", lpConfiguration);
+                    CBUILD_ASSERT(succeeded, "Failed to set library directory (`%s`) from variable", libdir.c_str());
+                    buildLibraryCmd.Args.push_back("-L" + dir);
+                    // buildLibraryCmd.Args.push_back("-L" + libdir);
+                }
+                for (const auto& ref : m_Project->References)
+                {
+                    buildLibraryCmd.Args.push_back("-l" + ref);
+                }
                 // Output
                 buildLibraryCmd.Args.push_back("-o");
                 buildLibraryCmd.Args.push_back(outputFilename);
@@ -802,9 +953,9 @@ namespace Cbuild
             case BuildOutputKind::ConsoleApp:
                 return new Builders::ConsoleAppBuilder{ pProject };
             case BuildOutputKind::StaticLibrary:
-                return new Builders::LibraryBuilder{ pProject };
+                return new Builders::StaticLibraryBuilder{ pProject };
             case BuildOutputKind::SharedLibrary:
-                return new Builders::LibraryBuilder{ pProject };
+                return new Builders::SharedLibraryBuilder{ pProject };
             default:
                 CBUILD_ASSERT(false, "Invalid build output kind");
                 return nullptr;
