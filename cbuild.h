@@ -50,8 +50,8 @@ namespace Cbuild
     enum class BuildOutputKind : uint16_t
     {
         ConsoleApp = 0,
-        StaticLibrary,
-        SharedLibrary,
+        StaticLib,
+        SharedLib,
     };
 
 
@@ -59,7 +59,7 @@ namespace Cbuild
     {
         std::string Name = {};
         List<std::string> Args = {};
-        
+
         operator bool() const noexcept;
     };
 
@@ -129,7 +129,13 @@ namespace Cbuild
         static IProjectBuilder* Create(BuildOutputKind Kind, const Project* pProject) noexcept;
     
     protected:
+        virtual void PrepareFinalBuildCommand(const std::string& OutputDir, const std::string& OutputFilename, const char* lpConfiguration) noexcept = 0;
+    
+    protected:
+        bool VerifyConfiguration(const char* lpConfiguration) noexcept;
+        void PrepareBaseCommand(Command* const pCmd, const Configuration& config, const char* lpConfiguration) noexcept;
         int32_t GenerateBuildCommandsAndOutputFiles(const char* lpConfiguration, const Command& baseCmd) noexcept;
+        int32_t RunBuildCommands() noexcept;
     
     protected:
         List<Command> m_Commands = {};
@@ -162,7 +168,7 @@ namespace Cbuild
 // CC OUTFILE... LIBDIR... REFS... -o <proj_name.exe>
 // 
 // ==============================
-// B. StaticLibrary
+// B. StaticLib
 // ==============================
 // CC DEFINE... INCLUDE... LIBDIR... REFS... <opt>... -c FILE -o outfile.o
 // CC DEFINE... INCLUDE... LIBDIR... REFS... <opt>... -c FILE -o outfile.o
@@ -170,7 +176,7 @@ namespace Cbuild
 // ar -rc -o <proj_name.lib> OUTFILE...
 // 
 // ==============================
-// C. SharedLibrary
+// C. SharedLib
 // ==============================
 // CC DEFINE... INCLUDE... LIBDIR... REFS... <opt>... -c FILE -o outfile.o
 // CC DEFINE... INCLUDE... LIBDIR... REFS... <opt>... -c FILE -o outfile.o

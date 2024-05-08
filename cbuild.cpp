@@ -206,125 +206,57 @@ namespace Cbuild::Builders
 
         virtual int32_t Build(const char* lpConfiguration) noexcept override
         {
-            CBUILD_ASSERT(!m_Project->Configurations.empty(), "No configurations defined!");
-            CBUILD_ASSERT(lpConfiguration && *lpConfiguration, "Invalid configuration");
+            if (!VerifyConfiguration(lpConfiguration))
+            {
+                return BuildResult::CommandProcessingFailed;
+            }
 
             const auto it = m_Project->Configurations.find({ lpConfiguration });
             if (it == m_Project->Configurations.end())
             {
-                printf("[ERROR]: Configuration `%s` was not found (check if it was defined and try again)\n", lpConfiguration);
+                CBUILD_LOG_ERROR("[ERROR]: Configuration `%s` was not found (check if it was defined and try again)\n", lpConfiguration);
                 return BuildResult::CommandProcessingFailed;
             }
 
             const Configuration& config = it->second;
             const std::string outputFilename = std::format("{}\\{}\\{}.exe", m_Project->Wks->OutputDir, lpConfiguration, m_Project->Name);
 
-            const auto PrepareBaseCommand = [this, &config]() -> Command
+            Command baseCmd = { .Name = m_Project->Compiler };
+            PrepareBaseCommand(&baseCmd, config, lpConfiguration);
+
+            GenerateBuildCommandsAndOutputFiles(lpConfiguration, baseCmd);
+            PrepareFinalBuildCommand({}, outputFilename, lpConfiguration);
+
+            return RunBuildCommands();
+        }
+
+        virtual void PrepareFinalBuildCommand(const std::string& OutputDir, const std::string& OutputFilename, const char* lpConfiguration) noexcept override
+        {
+            Command buildConsoleAppCmd{ .Name = m_Project->Compiler };
+
+            // For console apps (executables), we link to the libraries when building the actual .exe file
+            // Intermediate Files
+            for (const auto& obj : m_OutputFiles)
             {
-                // <CC> (-D <DEF> ...) (-I <INC> ...) (-L <LIBDIR> ...) (-l <LIB> ...) (<OPTS> ...) (<IN> ...)
-                Command cmd = { .Name = m_Project->Compiler };
-
-                // Defines
-                for (const auto& def : m_Project->Defines)
-                {
-                    cmd.Args.push_back("-D" + def);
-                }
-                for (const auto& def : config.Defines)
-                {
-                    cmd.Args.push_back("-D" + def);
-                }
-                // Includes
-                for (const auto& inc : m_Project->IncludeDirs)
-                {
-                    cmd.Args.push_back("-I" + inc);
-                }
-                // Options
-                if (m_Project->Arch.size() && m_Project->Arch == "x64")
-                {
-                    cmd.Args.push_back("-m64");
-                }
-                if (m_Project->Language == "C++")
-                {
-                    cmd.Args.push_back("-std=c++" + m_Project->CppVersion);
-                }
-                else
-                {
-                    cmd.Args.push_back("-std=c" + m_Project->CVersion);
-                }
-                for (const auto& flag : m_Project->Flags)
-                {
-                    cmd.Args.push_back("-" + flag);
-                }
-                for (const auto& flag : config.Flags)
-                {
-                    cmd.Args.push_back("-" + flag);
-                }
-                
-                return cmd;
-            };
-
-            const auto PrepareFinalBuildCommand = [this, &outputFilename, lpConfiguration]() -> void
+                buildConsoleAppCmd.Args.push_back(obj);
+            }
+            // Library & References
+            for (const auto& libdir : m_Project->LibraryDirs)
             {
-                Command buildConsoleAppCmd{ .Name = m_Project->Compiler };
-
-                // For console apps (executables), we link to the libraries when building the actual .exe file
-                // Intermediate Files
-                for (const auto& obj : m_OutputFiles)
-                {
-                    buildConsoleAppCmd.Args.push_back(obj);
-                }
-                // Library & References
-                for (const auto& libdir : m_Project->LibraryDirs)
-                {
-                    const auto[dir, succeeded] = SetVariables(libdir, "Configuration", lpConfiguration);
-                    CBUILD_ASSERT(succeeded, "Failed to set library directory (`%s`) from variable", libdir.c_str());
-                    buildConsoleAppCmd.Args.push_back("-L" + dir);
-                }
-                for (const auto& ref : m_Project->References)
-                {
-                    buildConsoleAppCmd.Args.push_back("-l" + ref);
-                }
-                // Output
-                buildConsoleAppCmd.Args.push_back("-o");
-                buildConsoleAppCmd.Args.push_back(outputFilename);
-                
-                m_Commands.push_back(buildConsoleAppCmd);
-                m_OutputFiles.push_back(outputFilename);
-            };
-
-            const auto BuildApp = [this]() -> int32_t
+                const auto[dir, succeeded] = SetVariables(libdir, "Configuration", lpConfiguration);
+                CBUILD_ASSERT(succeeded, "Failed to set library directory (`%s`) from variable", libdir.c_str());
+                buildConsoleAppCmd.Args.push_back("-L" + dir);
+            }
+            for (const auto& ref : m_Project->References)
             {
-                List<std::string> cmdLines;
-                cmdLines.reserve(m_Commands.size());
-
-                for (const auto& cmd : m_Commands)
-                {
-                    std::ostringstream oss;
-                    oss << cmd.Name;
-                    for (const auto& arg : cmd.Args)
-                    {
-                        oss << " " << arg;
-                    }
-                    cmdLines.push_back(oss.str());
-                }
-
-                BuildResult br = (BuildResult)0;
-                for (const auto& cmdline : cmdLines)
-                {
-                    printf("%s\n", cmdline.c_str());
-                    if (system(cmdline.c_str()) != 0)
-                    {
-                        br = BuildResult::WksBuildFailed;
-                    }
-                }
-
-                return br;
-            };
-
-            GenerateBuildCommandsAndOutputFiles(lpConfiguration, PrepareBaseCommand());
-            PrepareFinalBuildCommand();
-
-            return BuildApp();
+                buildConsoleAppCmd.Args.push_back("-l" + ref);
+            }
+            // Output
+            buildConsoleAppCmd.Args.push_back("-o");
+            buildConsoleAppCmd.Args.push_back(OutputFilename);
+            
+            m_Commands.push_back(buildConsoleAppCmd);
+            m_OutputFiles.push_back(OutputFilename);
         }
     };
 
@@ -341,8 +273,10 @@ namespace Cbuild::Builders
 
         virtual int32_t Build(const char* lpConfiguration) noexcept override
         {
-            CBUILD_ASSERT(!m_Project->Configurations.empty(), "No configurations defined!");
-            CBUILD_ASSERT(lpConfiguration && *lpConfiguration, "Invalid configuration");
+            if (!VerifyConfiguration(lpConfiguration))
+            {
+                return BuildResult::CommandProcessingFailed;
+            }
 
             const auto it = m_Project->Configurations.find({ lpConfiguration });
             if (it == m_Project->Configurations.end())
@@ -352,116 +286,48 @@ namespace Cbuild::Builders
             }
 
             const Configuration& config = it->second;
-            const char* ext = m_Project->OutputKind == BuildOutputKind::StaticLibrary ? "lib" : CBUILD_SHARED_LIB_EXT;
+            const char* ext = m_Project->OutputKind == BuildOutputKind::StaticLib ? "lib" : CBUILD_SHARED_LIB_EXT;
             const std::string outputDir = std::format("{}\\{}", m_Project->Wks->OutputDir, lpConfiguration);
             const std::string outputFilename = std::format("{}\\{}.{}", outputDir , m_Project->Name, ext);
 
-            const auto PrepareBaseCommand = [this, &config]() -> Command
+            Command baseCmd = { .Name = m_Project->Compiler };
+            PrepareBaseCommand(&baseCmd, config, lpConfiguration);
+
+            GenerateBuildCommandsAndOutputFiles(lpConfiguration, baseCmd);
+            PrepareFinalBuildCommand(outputDir, outputFilename, lpConfiguration);
+
+            return RunBuildCommands();
+        }
+
+        virtual void PrepareFinalBuildCommand(const std::string& OutputDir, const std::string& OutputFilename, const char* lpConfiguration) noexcept override
+        {
+            Command buildLibraryCmd = {};
+
+            buildLibraryCmd.Name = "ar";
+            buildLibraryCmd.Args.push_back("-rcs");
+
+            // Output
+            buildLibraryCmd.Args.push_back("-o");
+            buildLibraryCmd.Args.push_back(OutputFilename);
+            // Library & References
+            for (const auto& libdir : m_Project->LibraryDirs)
             {
-                // <CC> (-D <DEF> ...) (-I <INC> ...) (-L <LIBDIR> ...) (-l <LIB> ...) (<OPTS> ...) (<IN> ...)
-                Command cmd = { .Name = m_Project->Compiler };
-
-                // Defines
-                for (const auto& def : m_Project->Defines)
-                {
-                    cmd.Args.push_back("-D" + def);
-                }
-                for (const auto& def : config.Defines)
-                {
-                    cmd.Args.push_back("-D" + def);
-                }
-                // Includes
-                for (const auto& inc : m_Project->IncludeDirs)
-                {
-                    cmd.Args.push_back("-I" + inc);
-                }
-                // Library & References
-                for (const auto& libdir : m_Project->LibraryDirs)
-                {
-                    cmd.Args.push_back("-L" + libdir);
-                }
-                for (const auto& ref : m_Project->References)
-                {
-                    cmd.Args.push_back("-l" + ref);
-                }
-                // Options
-                if (m_Project->Arch.size() && m_Project->Arch == "x64")
-                {
-                    cmd.Args.push_back("-m64");
-                }
-                if (m_Project->Language == "C++")
-                {
-                    cmd.Args.push_back("-std=c++" + m_Project->CppVersion);
-                }
-                else
-                {
-                    cmd.Args.push_back("-std=c" + m_Project->CVersion);
-                }
-                for (const auto& flag : m_Project->Flags)
-                {
-                    cmd.Args.push_back("-" + flag);
-                }
-                for (const auto& flag : config.Flags)
-                {
-                    cmd.Args.push_back("-" + flag);
-                }
-                
-                return cmd;
-            };
-
-            const auto PrepareFinalBuildCommand = [this, &outputDir, &outputFilename]() -> void
+                const auto[dir, succeeded] = SetVariables(libdir, "Configuration", lpConfiguration);
+                CBUILD_ASSERT(succeeded, "Failed to set library directory (`%s`) from variable", libdir.c_str());
+                buildLibraryCmd.Args.push_back("-L" + dir);
+            }
+            for (const auto& ref : m_Project->References)
             {
-                Command buildLibraryCmd = {};
-
-                buildLibraryCmd.Name = "ar";
-                buildLibraryCmd.Args.push_back("-rcs");
-
-                // Output
-                buildLibraryCmd.Args.push_back("-o");
-                buildLibraryCmd.Args.push_back(outputFilename);
-                // Intermediate Files
-                for (const auto& obj : m_OutputFiles)
-                {
-                    buildLibraryCmd.Args.push_back(obj);
-                }
-                
-                m_Commands.push_back(buildLibraryCmd);
-                m_OutputFiles.push_back(outputFilename);
-            };
-
-            const auto BuildApp = [this]() -> int32_t
+                buildLibraryCmd.Args.push_back("-l" + ref);
+            }
+            // Intermediate Files
+            for (const auto& obj : m_OutputFiles)
             {
-                List<std::string> cmdLines;
-                cmdLines.reserve(m_Commands.size());
-
-                for (const auto& cmd : m_Commands)
-                {
-                    std::ostringstream oss;
-                    oss << cmd.Name;
-                    for (const auto& arg : cmd.Args)
-                    {
-                        oss << " " << arg;
-                    }
-                    cmdLines.push_back(oss.str());
-                }
-
-                BuildResult br = (BuildResult)0;
-                for (const auto& cmdline : cmdLines)
-                {
-                    printf("%s\n", cmdline.c_str());
-                    if (system(cmdline.c_str()) != 0)
-                    {
-                        br = BuildResult::WksBuildFailed;
-                    }
-                }
-
-                return br;
-            };
-
-            GenerateBuildCommandsAndOutputFiles(lpConfiguration, PrepareBaseCommand());
-            PrepareFinalBuildCommand();
-
-            return BuildApp();
+                buildLibraryCmd.Args.push_back(obj);
+            }
+            
+            m_Commands.push_back(buildLibraryCmd);
+            m_OutputFiles.push_back(OutputFilename);
         }
     };
 
@@ -478,8 +344,10 @@ namespace Cbuild::Builders
 
         virtual int32_t Build(const char* lpConfiguration) noexcept override
         {
-            CBUILD_ASSERT(!m_Project->Configurations.empty(), "No configurations defined!");
-            CBUILD_ASSERT(lpConfiguration && *lpConfiguration, "Invalid configuration");
+            if (!VerifyConfiguration(lpConfiguration))
+            {
+                return BuildResult::CommandProcessingFailed;
+            }
 
             const auto it = m_Project->Configurations.find({ lpConfiguration });
             if (it == m_Project->Configurations.end())
@@ -489,131 +357,49 @@ namespace Cbuild::Builders
             }
 
             const Configuration& config = it->second;
-            const char* ext = m_Project->OutputKind == BuildOutputKind::StaticLibrary ? "lib" : CBUILD_SHARED_LIB_EXT;
+            const char* ext = m_Project->OutputKind == BuildOutputKind::StaticLib ? "lib" : CBUILD_SHARED_LIB_EXT;
             const std::string outputDir = std::format("{}\\{}", m_Project->Wks->OutputDir, lpConfiguration);
             const std::string outputFilename = std::format("{}\\{}.{}", outputDir , m_Project->Name, ext);
 
-            const auto PrepareBaseCommand = [this, &config, lpConfiguration]() -> Command
+            Command baseCmd = { .Name = m_Project->Compiler };
+            PrepareBaseCommand(&baseCmd, config, lpConfiguration);
+
+            GenerateBuildCommandsAndOutputFiles(lpConfiguration, baseCmd);
+            PrepareFinalBuildCommand(outputDir, outputFilename, lpConfiguration);
+
+            return RunBuildCommands();
+        }
+    
+        virtual void PrepareFinalBuildCommand(const std::string& OutputDir, const std::string& OutputFilename, const char* lpConfiguration) noexcept override
+        {
+            Command buildLibraryCmd = {};
+
+            buildLibraryCmd.Name = m_Project->Compiler;
+            buildLibraryCmd.Args.push_back("-shared");
+            buildLibraryCmd.Args.push_back(std::format("-Xlinker --out-implib {}\\{}.lib", OutputDir, m_Project->Name));
+
+            // Library & References
+            for (const auto& libdir : m_Project->LibraryDirs)
             {
-                // <CC> (-D <DEF> ...) (-I <INC> ...) (-L <LIBDIR> ...) (-l <LIB> ...) (<OPTS> ...) (<IN> ...)
-                Command cmd = { .Name = m_Project->Compiler };
-
-                // Defines
-                for (const auto& def : m_Project->Defines)
-                {
-                    cmd.Args.push_back("-D" + def);
-                }
-                for (const auto& def : config.Defines)
-                {
-                    cmd.Args.push_back("-D" + def);
-                }
-                // Includes
-                for (const auto& inc : m_Project->IncludeDirs)
-                {
-                    cmd.Args.push_back("-I" + inc);
-                }
-                // Library & References
-                /* for (const auto& libdir : m_Project->LibraryDirs)
-                {
-                    const auto[dir, succeeded] = SetVariables(libdir, "Configuration", lpConfiguration);
-                    CBUILD_ASSERT(succeeded, "Failed to set library directory (`%s`) from variable", libdir.c_str());
-                    cmd.Args.push_back("-L" + dir);
-                }
-                for (const auto& ref : m_Project->References)
-                {
-                    cmd.Args.push_back("-l" + ref);
-                } */
-                // Options
-                if (m_Project->Arch.size() && m_Project->Arch == "x64")
-                {
-                    cmd.Args.push_back("-m64");
-                }
-                if (m_Project->Language == "C++")
-                {
-                    cmd.Args.push_back("-std=c++" + m_Project->CppVersion);
-                }
-                else
-                {
-                    cmd.Args.push_back("-std=c" + m_Project->CVersion);
-                }
-                for (const auto& flag : m_Project->Flags)
-                {
-                    cmd.Args.push_back("-" + flag);
-                }
-                for (const auto& flag : config.Flags)
-                {
-                    cmd.Args.push_back("-" + flag);
-                }
-                
-                return cmd;
-            };
-
-            const auto PrepareFinalBuildCommand = [this, &outputDir, &outputFilename, lpConfiguration]() -> void
+                const auto[dir, succeeded] = SetVariables(libdir, "Configuration", lpConfiguration);
+                CBUILD_ASSERT(succeeded, "Failed to set library directory (`%s`) from variable", libdir.c_str());
+                buildLibraryCmd.Args.push_back("-L" + dir);
+            }
+            for (const auto& ref : m_Project->References)
             {
-                Command buildLibraryCmd = {};
-
-                buildLibraryCmd.Name = m_Project->Compiler;
-                buildLibraryCmd.Args.push_back("-shared");
-                buildLibraryCmd.Args.push_back(std::format("-Xlinker --out-implib {}\\{}.lib", outputDir, m_Project->Name));
-
-                // Library & References
-                for (const auto& libdir : m_Project->LibraryDirs)
-                {
-                    const auto[dir, succeeded] = SetVariables(libdir, "Configuration", lpConfiguration);
-                    CBUILD_ASSERT(succeeded, "Failed to set library directory (`%s`) from variable", libdir.c_str());
-                    buildLibraryCmd.Args.push_back("-L" + dir);
-                    // buildLibraryCmd.Args.push_back("-L" + libdir);
-                }
-                for (const auto& ref : m_Project->References)
-                {
-                    buildLibraryCmd.Args.push_back("-l" + ref);
-                }
-                // Output
-                buildLibraryCmd.Args.push_back("-o");
-                buildLibraryCmd.Args.push_back(outputFilename);
-                // Intermediate Files
-                for (const auto& obj : m_OutputFiles)
-                {
-                    buildLibraryCmd.Args.push_back(obj);
-                }
-                
-                m_Commands.push_back(buildLibraryCmd);
-                m_OutputFiles.push_back(outputFilename);
-            };
-
-            const auto BuildApp = [this]() -> int32_t
+                buildLibraryCmd.Args.push_back("-l" + ref);
+            }
+            // Output
+            buildLibraryCmd.Args.push_back("-o");
+            buildLibraryCmd.Args.push_back(OutputFilename);
+            // Intermediate Files
+            for (const auto& obj : m_OutputFiles)
             {
-                List<std::string> cmdLines;
-                cmdLines.reserve(m_Commands.size());
-
-                for (const auto& cmd : m_Commands)
-                {
-                    std::ostringstream oss;
-                    oss << cmd.Name;
-                    for (const auto& arg : cmd.Args)
-                    {
-                        oss << " " << arg;
-                    }
-                    cmdLines.push_back(oss.str());
-                }
-
-                BuildResult br = (BuildResult)0;
-                for (const auto& cmdline : cmdLines)
-                {
-                    printf("%s\n", cmdline.c_str());
-                    if (system(cmdline.c_str()) != 0)
-                    {
-                        br = BuildResult::WksBuildFailed;
-                    }
-                }
-
-                return br;
-            };
-
-            GenerateBuildCommandsAndOutputFiles(lpConfiguration, PrepareBaseCommand());
-            PrepareFinalBuildCommand();
-
-            return BuildApp();
+                buildLibraryCmd.Args.push_back(obj);
+            }
+            
+            m_Commands.push_back(buildLibraryCmd);
+            m_OutputFiles.push_back(OutputFilename);
         }
     };
 
@@ -635,22 +421,22 @@ namespace Cbuild
     class Converter
     {
     public:
-        static const char* OutputKindToString(BuildOutputKind Kind) noexcept
+        static inline const char* OutputKindToString(BuildOutputKind Kind) noexcept
         {
             switch (Kind)
             {
-                case BuildOutputKind::ConsoleApp:    return "ConsoleApp";
-                case BuildOutputKind::StaticLibrary: return "StaticLibrary";
-                case BuildOutputKind::SharedLibrary: return "SharedLibrary";
+                case BuildOutputKind::ConsoleApp: return "ConsoleApp";
+                case BuildOutputKind::StaticLib:  return "StaticLib";
+                case BuildOutputKind::SharedLib:  return "SharedLib";
                 default: return CBUILD_ASSERT(false, 0), nullptr;
             }
         }
 
-        static BuildOutputKind StringToOutputKind(const std::string_view& Value) noexcept
+        static inline BuildOutputKind StringToOutputKind(const std::string_view& Value) noexcept
         {
-            if (Value == "ConsoleApp")    return BuildOutputKind::ConsoleApp;
-            if (Value == "StaticLibrary") return BuildOutputKind::StaticLibrary;
-            if (Value == "SharedLibrary") return BuildOutputKind::SharedLibrary;
+            if (Value == "ConsoleApp") return BuildOutputKind::ConsoleApp;
+            if (Value == "StaticLib")  return BuildOutputKind::StaticLib;
+            if (Value == "SharedLib")  return BuildOutputKind::SharedLib;
             
             return static_cast<BuildOutputKind>(-1);
         }
@@ -662,11 +448,20 @@ namespace Cbuild
     public:
         static bool LoadWorkspace(Workspace* const pWks, const char* lpXmlFilepath) noexcept
         {
-            CBUILD_ASSERT(lpXmlFilepath, "Invalid filepath");
+            if (!lpXmlFilepath)
+            {
+                CBUILD_LOG_ERROR("Invalid project filepath");
+                return false;
+            }
 
             pugi::xml_document doc;
             pugi::xml_parse_result res = doc.load_file(lpXmlFilepath, pugi::parse_full);
-            CBUILD_ASSERT((bool)res, "Error in parsing `%s`. Description=%s, FileOffset=%I64d", lpXmlFilepath, res.description(), res.offset);
+            if (!(bool)res)
+            {
+                constexpr const char* const lpErrorMessage = "Error in parsing `%s`. Description=%s, FileOffset=%I64d";
+                CBUILD_LOG_ERROR(lpErrorMessage, lpXmlFilepath, res.description(), res.offset);
+                return false;
+            }
 
             const pugi::xml_node xWks = doc.first_child();
 
@@ -688,7 +483,8 @@ namespace Cbuild
             }
             else
             {
-                pWks->OutputDir = std::string{ "bin" };
+                // pWks->OutputDir = std::string{ "bin" };
+                pWks->OutputDir = std::string{ "./" };
             }
             
             // Intermediates Directory
@@ -698,7 +494,8 @@ namespace Cbuild
             }
             else
             {
-                pWks->IntermediateDir = std::string{ "bin-int" };
+                // pWks->IntermediateDir = std::string{ "bin-int" };
+                pWks->IntermediateDir = std::string{ "./" };
             }
             
             // CWD
@@ -952,9 +749,9 @@ namespace Cbuild
         {
             case BuildOutputKind::ConsoleApp:
                 return new Builders::ConsoleAppBuilder{ pProject };
-            case BuildOutputKind::StaticLibrary:
+            case BuildOutputKind::StaticLib:
                 return new Builders::StaticLibraryBuilder{ pProject };
-            case BuildOutputKind::SharedLibrary:
+            case BuildOutputKind::SharedLib:
                 return new Builders::SharedLibraryBuilder{ pProject };
             default:
                 CBUILD_ASSERT(false, "Invalid build output kind");
@@ -962,7 +759,91 @@ namespace Cbuild
         }
     }
 
-    int32_t IProjectBuilder::GenerateBuildCommandsAndOutputFiles(const char* lpConfiguration, const Command& baseCmd) noexcept
+    void IProjectBuilder::PrepareBaseCommand(Command* const pCmd, const Configuration& config, const char* lpConfiguration) noexcept
+    {
+        // Defines
+        for (const auto& def : m_Project->Defines)
+        {
+            pCmd->Args.push_back("-D" + def);
+        }
+        for (const auto& def : config.Defines)
+        {
+            pCmd->Args.push_back("-D" + def);
+        }
+        // Includes
+        for (const auto& inc : m_Project->IncludeDirs)
+        {
+            pCmd->Args.push_back("-I" + inc);
+        }
+        // Options
+        if (m_Project->Arch.size() && m_Project->Arch == "x64")
+        {
+            pCmd->Args.push_back("-m64");
+        }
+        if (m_Project->Language == "C++")
+        {
+            pCmd->Args.push_back("-std=c++" + m_Project->CppVersion);
+        }
+        else
+        {
+            pCmd->Args.push_back("-std=c" + m_Project->CVersion);
+        }
+        for (const auto& flag : m_Project->Flags)
+        {
+            pCmd->Args.push_back(flag);
+        }
+        for (const auto& flag : config.Flags)
+        {
+            pCmd->Args.push_back(flag);
+        }
+    }
+
+    int32_t IProjectBuilder::RunBuildCommands() noexcept
+    {
+        List<std::string> cmdLines;
+        cmdLines.reserve(m_Commands.size());
+
+        for (const auto& cmd : m_Commands)
+        {
+            std::ostringstream oss;
+            oss << cmd.Name;
+            for (const auto& arg : cmd.Args)
+            {
+                oss << " " << arg;
+            }
+            cmdLines.push_back(oss.str());
+        }
+
+        BuildResult br = (BuildResult)0;
+        for (const auto& cmdline : cmdLines)
+        {
+            printf("%s\n", cmdline.c_str());
+            if (system(cmdline.c_str()) != 0)
+            {
+                br = BuildResult::WksBuildFailed;
+            }
+        }
+
+        return br;
+    }
+
+    bool IProjectBuilder::VerifyConfiguration(const char* lpConfiguration) noexcept
+    {
+        if (m_Project->Configurations.empty())
+        {
+            CBUILD_LOG_ERROR("[ERROR]: No configuration was defined\n");
+            return false;
+        }
+        if (!lpConfiguration || !(*lpConfiguration))
+        {
+            CBUILD_LOG_ERROR("[ERROR]: Invalid configuration provided (`%s`)\n", lpConfiguration);
+            return false;
+        }
+
+        return true;
+    }
+
+    int32_t IProjectBuilder::GenerateBuildCommandsAndOutputFiles(const char *lpConfiguration, const Command &baseCmd) noexcept
     {
         namespace stdfs = std::filesystem;
 

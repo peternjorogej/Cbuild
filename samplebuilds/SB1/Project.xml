@@ -3,14 +3,14 @@
     <OutputDir>bin</OutputDir>
     <IntermediateDir>bin-int</IntermediateDir>
 
-    <Project Name="Api" Kind="SharedLibrary" Arch="x64" Language="C++"  CppVersion="17" Compiler="g++">
+    <Project Name="Api" Kind="SharedLib" Arch="x64" Language="C++"  CppVersion="17" Compiler="g++">
         <Configuration Name="Debug" />
         <Configuration Name="Release" />
 
         <Flags>
-            <Item Configuration="Debug">ggdb</Item>
-            <Item Configuration="Debug">Og</Item>
-            <Item Configuration="Release">O2</Item>
+            <Item Configuration="Debug">-ggdb</Item>
+            <Item Configuration="Debug">-Og</Item>
+            <Item Configuration="Release">-O2</Item>
         </Flags>
         <Defines>
             <Item Configuration="Debug">API_DEBUG</Item>
@@ -27,9 +27,9 @@
         <Configuration Name="Release" />
 
         <Flags>
-            <Item Configuration="Debug">ggdb</Item>
-            <Item Configuration="Debug">Og</Item>
-            <Item Configuration="Release">O2</Item>
+            <Item Configuration="Debug">-ggdb</Item>
+            <Item Configuration="Debug">-Og</Item>
+            <Item Configuration="Release">-O2</Item>
         </Flags>
         <Defines>
             <Item Configuration="Debug">API_DEBUG</Item>
@@ -37,7 +37,6 @@
         </Defines>
 
         <LibraryDirs>
-            <!-- <Item>bin\Debug</Item> -->
             <Item>bin\$(Configuration)</Item>
         </LibraryDirs>
         <References>
