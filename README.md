@@ -12,18 +12,15 @@ Let's say you have a folder. Inside the folder you have a subfolder called _bin_
     <IntermediateDir>obj</IntermediateDir>
 
     <Project Name="ProjectX" Kind="ConsoleApp" Arch="x64" Language="C++"  CppVersion="17" Compiler="g++">
-        <!-- Expected build output: -->
-        <!-- g++ -DPX_DEBUG -m64 -std=c++17 -Og -c ./Main.cpp -o obj\Debug\Main.o -->
-        <!-- g++ obj\Debug\Main.o -o bin\Debug\ProjectX.exe -->
-        <Configuration Name="Debug">
-            <Flags>
-                <Item>Og</Item>
-            </Flags>
-            <Defines>
-                <Item>PX_DEBUG</Item>
-            </Defines>
-        </Configuration>
-
+        <Configuration Name="Debug" />
+        <Flags>
+            <Item Configuration="Debug">Og</Item>
+            <Item>-Wall</Item>
+        </Flags>
+        <Defines>
+            <Item>PX_DEBUG</Item>
+        </Defines>
+        
         <SourceDirs>
             <Item>./</Item> <!-- Current directory is a source folder -->
         </SourceDirs>
@@ -34,7 +31,13 @@ Let's say you have a folder. Inside the folder you have a subfolder called _bin_
 ```cpp
 int main()
 {
-    printf("Hello, World from Cbuild & ProjectX\n\n");
+#ifdef PX_DEBUG
+    const char* config = "DEBUG";
+#else
+    const char* config = "RELEASE";
+#endif // PX_DEBUG
+    printf("[%s]: Hello, World from Cbuild & ProjectX\n\n", config);
+    return 0;
 }
 ```
 
@@ -48,7 +51,7 @@ cbuild Project.xml --config Debug
 #### TODO
 A lot of work😅
 
-- [] Implement use of special variables (a la Visual Studio, premake) e.g. `$(Configuration)`. In this case $(Configuration) = Debug | Release; this would be used in tags such as `<LibraryDirs>` and `<SourceDirs>`.
+[x] Implement use of special variables (a la Visual Studio, premake) e.g. `$(Configuration)`. In this case $(Configuration) = Debug | Release; this would be used in tags such as `<LibraryDirs>` and `<SourceDirs>`.
     ```xml
     <!-- ... -->
     <LibraryDirs>
@@ -57,8 +60,8 @@ A lot of work😅
     <!-- ... -->
     ```
   
-- [] Building of dependencies before dependents, e.g. below, Driver needs Api, so Api has to be built before, NOT AFTER.
-- [] Put `<Defines>` in one place in the `<Project>`, and not have definitions separated depending on the configuration. The configuration would be defined in the `<Item>` tag within the `<Defines>`. (The last define configuration-independent).
+[] Building of dependencies before dependents, e.g. below, Driver needs Api, so Api has to be built before, NOT AFTER.
+[x] Put `<Defines>` in one place in the `<Project>`, and not have definitions separated depending on the configuration. The configuration would be defined in the `<Item>` tag within the `<Defines>`. (The last define configuration-independent).
     ```xml
     <Project>
         <!-- ... -->
@@ -70,7 +73,7 @@ A lot of work😅
         <!-- ... -->
     </Project>
     ```
-- [] Cleaning (deleting files from output directories) and checking of output files in their respective directories before building to optimizing building/compiling process
-- [] (**OPTIONAL**) Filewatcher for XML project file, to auto-build on modified; or filewatch the CWD to auto-build on any file modified.
+[] Cleaning (deleting files from output directories) and checking of output files in their respective directories before building to optimizing building/compiling process
+[] (**OPTIONAL**, *Sounds interesting*) Filewatcher for XML project file, to auto-build on modified; or filewatch the CWD to auto-build on any file modified.
 
 
