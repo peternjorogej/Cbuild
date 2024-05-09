@@ -51,7 +51,7 @@ cbuild Project.xml --config Debug
 #### TODO
 A lot of work😅
 
-[x] Implement use of special variables (a la Visual Studio, premake) e.g. `$(Configuration)`. In this case $(Configuration) = Debug | Release; this would be used in tags such as `<LibraryDirs>` and `<SourceDirs>`.
+- [x] Implement use of special variables (a la Visual Studio, premake) e.g. `$(Configuration)`. In this case $(Configuration) = Debug | Release; this would be used in tags such as `<LibraryDirs>` and `<SourceDirs>`.
     ```xml
     <!-- ... -->
     <LibraryDirs>
@@ -60,8 +60,8 @@ A lot of work😅
     <!-- ... -->
     ```
   
-[] Building of dependencies before dependents, e.g. below, Driver needs Api, so Api has to be built before, NOT AFTER.
-[x] Put `<Defines>` in one place in the `<Project>`, and not have definitions separated depending on the configuration. The configuration would be defined in the `<Item>` tag within the `<Defines>`. (The last define configuration-independent).
+- [ ] Building of dependencies before dependents, e.g. below, Driver needs Api, so Api has to be built before, NOT AFTER.
+- [x] Put `<Defines>` in one place in the `<Project>`, and not have definitions separated depending on the configuration. The configuration would be defined in the `<Item>` tag within the `<Defines>`. (The last define configuration-independent).
     ```xml
     <Project>
         <!-- ... -->
@@ -73,7 +73,7 @@ A lot of work😅
         <!-- ... -->
     </Project>
     ```
-[] Cleaning (deleting files from output directories) and checking of output files in their respective directories before building to optimizing building/compiling process
-[] (**OPTIONAL**, *Sounds interesting*) Filewatcher for XML project file, to auto-build on modified; or filewatch the CWD to auto-build on any file modified.
+- [ ] Cleaning (deleting files from output directories) and checking of output files in their respective directories before building to optimizing building/compiling process
+- [ ] (**OPTIONAL**, *Sounds interesting*) Filewatcher for XML project file, to auto-build on modified; or filewatch the CWD to auto-build on any file modified.
 
 
